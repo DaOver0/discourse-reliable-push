@@ -12,7 +12,13 @@ RSpec.describe ReliablePush::Admin::StatusController do
     get "/reliable-push/admin/status.json"
 
     expect(response.status).to eq(200)
-    expect(response.parsed_body).to include("subscriptions", "deliveries_last_7_days", "attempts_last_7_days")
+    expect(response.parsed_body).to include(
+      "subscriptions",
+      "deliveries",
+      "attempts",
+      "oldest_pending_delivery",
+      "latest_delivery",
+    )
     expect(response.body).not_to include("p256dh")
     expect(response.body).not_to include("auth")
   end

@@ -2,17 +2,26 @@
 
 module ::ReliablePush
   class Engine < ::Rails::Engine
-    engine_name PLUGIN_NAME
+    engine_name "reliable_push"
     isolate_namespace ReliablePush
   end
 end
 
 ReliablePush::Engine.routes.draw do
-  post "/subscriptions/sync" => "subscriptions#sync"
   get "/status" => "status#show"
-  get "/admin/status" => "admin/status#show"
+  get "/preferences" => "preferences#show"
+  put "/preferences" => "preferences#update"
+  patch "/preferences" => "preferences#update"
+  post "/subscriptions/sync" => "subscriptions#sync"
+  post "/ack/received" => "acknowledgements#received"
+  post "/ack/opened" => "acknowledgements#opened"
+
+  # Compatibility with 0.2.x notification payloads that embedded the token in
+  # the acknowledgement URL.
   post "/ack/:delivery_id/:token/received" => "acknowledgements#received"
   post "/ack/:delivery_id/:token/opened" => "acknowledgements#opened"
-end
 
-Discourse::Application.routes.draw { mount ::ReliablePush::Engine, at: "/reliable-push" }
+  namespace :admin do
+    get "/status" => "status#show"
+  end
+end

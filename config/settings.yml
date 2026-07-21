@@ -2,63 +2,158 @@ plugins:
   reliable_push_enabled:
     default: false
     client: true
+
   reliable_push_replace_core_web_push:
-    default: true
-  reliable_push_respect_do_not_disturb:
-    default: true
-  reliable_push_post_notifications:
-    default: true
-  reliable_push_notify_all_topic_posts:
     default: false
-  reliable_push_all_topic_posts_group_ids:
+
+  reliable_push_topic_events_enabled:
+    default: true
+
+  reliable_push_topic_posts_enabled:
+    default: true
+
+  reliable_push_new_topics_enabled:
+    default: true
+
+  reliable_push_new_categories_enabled:
+    default: true
+
+  reliable_push_chat_enabled:
+    default: true
+
+  reliable_push_mentions_replies_enabled:
+    default: true
+
+  reliable_push_private_messages_enabled:
+    default: true
+
+  reliable_push_badges_enabled:
+    default: true
+
+  reliable_push_account_events_enabled:
+    default: true
+
+  reliable_push_other_events_enabled:
+    default: true
+
+  reliable_push_resenha_enabled:
+    default: true
+
+  reliable_push_default_sound:
+    default: true
+    client: true
+
+  reliable_push_default_tab_blink:
+    default: true
+    client: true
+
+  reliable_push_topic_group_ids:
     default: ""
     type: list
-    list_type: simple
-  reliable_push_all_topic_posts_max_recipients:
+
+  reliable_push_category_group_ids:
+    default: ""
+    type: list
+
+  reliable_push_resenha_group_ids:
+    default: ""
+    type: list
+
+  reliable_push_max_fanout:
     default: 10000
     min: 1
-    max: 1000000
-  reliable_push_chat_notifications:
-    default: true
-  reliable_push_badge_notifications:
-    default: true
-  reliable_push_other_notifications:
-    default: true
-  reliable_push_broadcast_new_topics:
-    default: false
-  reliable_push_broadcast_group_ids:
-    default: ""
-    type: list
-    list_type: simple
-  reliable_push_broadcast_max_recipients:
-    default: 1000
-    min: 1
     max: 100000
-  reliable_push_excerpt_length:
-    default: 240
-    min: 40
-    max: 1000
+
+  reliable_push_resenha_join_cooldown_seconds:
+    default: 300
+    min: 30
+    max: 86400
+
   reliable_push_delivery_ttl_hours:
     default: 72
     min: 1
     max: 720
-  reliable_push_retry_delays_seconds:
-    default: "60|300|1800|7200|21600|86400"
-    type: list
-    list_type: simple
+
   reliable_push_max_attempts:
     default: 8
     min: 1
     max: 20
-  reliable_push_open_timeout_seconds:
-    default: 5
+
+  reliable_push_retry_base_seconds:
+    default: 30
+    min: 5
+    max: 3600
+
+  reliable_push_cleanup_after_days:
+    default: 30
     min: 1
-    max: 60
-  reliable_push_read_timeout_seconds:
-    default: 10
+    max: 365
+
+
+  # Legacy 0.2.x settings are kept so an in-place upgrade does not lose its
+  # stored configuration. The new policy settings above take precedence.
+  reliable_push_respect_do_not_disturb:
+    default: true
+
+  reliable_push_post_notifications:
+    default: true
+
+  reliable_push_notify_all_topic_posts:
+    default: true
+
+  reliable_push_all_topic_posts_group_ids:
+    default: ""
+    type: list
+    list_type: simple
+
+  reliable_push_all_topic_posts_max_recipients:
+    default: 10000
     min: 1
-    max: 120
+    max: 1000000
+
+  reliable_push_chat_notifications:
+    default: true
+
+  reliable_push_badge_notifications:
+    default: true
+
+  reliable_push_other_notifications:
+    default: true
+
+  reliable_push_broadcast_new_topics:
+    default: true
+
+  reliable_push_broadcast_group_ids:
+    default: ""
+    type: list
+    list_type: simple
+
+  reliable_push_broadcast_max_recipients:
+    default: 10000
+    min: 1
+    max: 100000
+
+  reliable_push_excerpt_length:
+    default: 240
+    min: 40
+    max: 1000
+
+  reliable_push_retry_delays_seconds:
+    default: "60|300|1800|7200|21600|86400"
+    type: list
+    list_type: simple
+
   reliable_push_retention_days:
     default: 30
     min: 1
     max: 365
+
+  reliable_push_open_timeout_seconds:
+    default: 5
+    min: 1
+    max: 60
+
+  reliable_push_read_timeout_seconds:
+    default: 10
+    min: 1
+    max: 120

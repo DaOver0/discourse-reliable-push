@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module ReliablePush
+module ::ReliablePush
   class Sender
     TOKEN_VALID_FOR_SECONDS = 5.minutes.to_i
 

@@ -1,6 +1,6 @@
 (function () {
-  function sendAck(url) {
-    if (!url) {
+  function sendAck(url, token) {
+    if (!url || !token) {
       return Promise.resolve();
     }
 
@@ -8,9 +8,40 @@
       method: "POST",
       credentials: "same-origin",
       keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: token }),
     }).catch(function (error) {
       console.error("Reliable Push acknowledgement failed", error);
     });
+  }
+
+  function metadataFromPush(payload) {
+    if (!payload) {
+      return null;
+    }
+
+    return (
+      payload.reliable_push ||
+      (payload.data && payload.data.reliable_push) ||
+      (payload.data &&
+        payload.data.actionData &&
+        payload.data.actionData.reliablePush) ||
+      null
+    );
+  }
+
+  function metadataFromNotification(notification) {
+    var data = notification && notification.data;
+    if (!data) {
+      return null;
+    }
+
+    return (
+      data.reliable_push ||
+      (data.actionData && data.actionData.reliablePush) ||
+      (data.action_data && data.action_data.reliable_push) ||
+      null
+    );
   }
 
   self.addEventListener("push", function (event) {
@@ -21,17 +52,16 @@
       return;
     }
 
-    var ack = payload && payload.reliable_push;
-    if (ack && ack.received_url) {
-      event.waitUntil(sendAck(ack.received_url));
+    var metadata = metadataFromPush(payload);
+    if (metadata) {
+      event.waitUntil(sendAck(metadata.received_url, metadata.token));
     }
   });
 
   self.addEventListener("notificationclick", function (event) {
-    var actionData = event.notification && event.notification.data && event.notification.data.actionData;
-    var ack = actionData && actionData.reliable_push;
-    if (ack && ack.opened_url) {
-      event.waitUntil(sendAck(ack.opened_url));
+    var metadata = metadataFromNotification(event.notification);
+    if (metadata) {
+      event.waitUntil(sendAck(metadata.opened_url, metadata.token));
     }
   });
 })();

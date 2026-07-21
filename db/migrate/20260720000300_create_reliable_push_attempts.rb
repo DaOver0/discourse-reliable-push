@@ -13,7 +13,10 @@ class CreateReliablePushAttempts < ActiveRecord::Migration[7.0]
       t.timestamps
     end
 
-    add_index :reliable_push_attempts, %i[delivery_id subscription_id], unique: true, name: "idx_reliable_push_attempts_delivery_subscription"
+    add_index :reliable_push_attempts,
+              %i[delivery_id subscription_id],
+              unique: true,
+              name: "idx_reliable_push_attempts_delivery_subscription"
     add_index :reliable_push_attempts, %i[state next_attempt_at]
   end
 end

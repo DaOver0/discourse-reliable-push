@@ -1,44 +1,100 @@
-# Architecture
+# Архитектура Reliable Push 0.3.0
 
-## Event path
+## 1. Event adapters
+
+Источники:
+
+- `PushNotificationPusher.push` — стандартные персональные Web Push события;
+- `notification_created` — persisted account/plugin events;
+- `post_alerter_after_save_post` — новый topic/post fanout;
+- `category_created` — новые категории;
+- Resenha `ParticipantTracker.add` или стабильное upstream событие.
+
+Адаптеры не отправляют Web Push напрямую. Они вызывают `EventIngestor`.
+
+## 2. Semantic event and deduplication
+
+`EventIngestor` создаёт один `Delivery` на пользователя и semantic key:
+
+- `post:<post_id>`;
+- `chat:<type>:<chat_message_id>`;
+- `notification:<notification_id>`;
+- `category:created:<category_id>`;
+- `resenha:join:<room_id>:<user_id>:<time_bucket>`.
+
+Персональное событие с более высоким приоритетом обновляет payload уже существующего broadcast-события.
+
+## 3. Recipient policy
+
+`RecipientScope` определяет кандидатов по стандартным и зеркальным Push-подпискам.
+
+`AccessChecker` проверяет:
+
+- active/approved/non-staged/non-bot/non-suspended;
+- DND;
+- user preference;
+- Guardian ACL;
+- автора сообщения;
+- TopicUser mute;
+- CategoryUser mute;
+- TagUser mute;
+- `watched_precedence_over_muted`;
+- доступ к Resenha room.
+
+Проверка выполняется дважды: при ingestion/fanout и перед Web Push.
+
+## 4. Durable outbox
+
+`Delivery` — логическое событие для пользователя.
+
+`Attempt` — отдельная попытка для каждого браузера/PWA устройства.
+
+Состояния:
 
 ```text
-Discourse notification or chat/post push event
-  → ReliablePush::EventIngestor
-  → reliable_push_deliveries (deduplicated outbox)
-  → ReliablePushPrepareDelivery
-  → reliable_push_attempts (one row per active device)
-  → ReliablePushDeliverAttempt
-  → Web Push service
-  → Discourse service worker + plugin extension
-  → received/opened ACK
+Delivery: pending → preparing → accepted → received → opened
+                     ↘ no_subscription / cancelled / failed / expired
+
+Attempt:  pending → sending → accepted
+                       ↘ retrying → ...
+                       ↘ failed / expired / cancelled
 ```
 
-## Core replacement boundary
+Повторы используют exponential backoff с jitter. HTTP 404/410 отключают подписку.
 
-The plugin prepends only `PushNotificationPusher.push`. When replacement mode is active, the standard browser sender is skipped. It does not register a global push filter, because that filter is also used by Discourse for live in-browser MessageBus alerts. `HubPushNotificationPusher` continues to run from the core delivery job.
+Переходы `pending/no_subscription → preparing` и `pending/retrying → sending` выполняются атомарными SQL-claims. Это защищает от параллельной обработки дублированных Sidekiq jobs. Плановый `ReliablePushRecoverStaleAttempts` возвращает зависшие `pending`/`preparing`/`sending` и просроченные `retrying` записи в рабочую очередь; условные UPDATE не могут перезаписать уже завершившийся конкурентный переход.
 
-## Deduplication
+Состояние `Delivery` монотонно для успешного пути: поздний `accepted` не понижает `received/opened`. Сбой одного endpoint не понижает логическую доставку, если другое устройство уже принято Push-сервисом.
 
-Semantic keys prioritize stable source identifiers:
+## 5. Subscription bridge
 
-- `chat:<type>:<chat_message_id>`
-- `post:<type>:<post_id>`
-- `topic-post:<type>:<topic_id>:<post_number>`
-- `notification:<notification_id>`
+`Subscription.mirror_core_for_user!` импортирует стандартные `PushSubscription` без ожидания, пока пользователь снова откроет сайт.
 
-The database enforces uniqueness per user.
+Клиентская синхронизация поддерживает актуальность endpoint/keys и повторно запускает свежие `no_subscription`/`failed` доставки. Явная синхронизация текущего вошедшего браузера может переназначить endpoint его фактическому владельцу; фоновое зеркало core-подписки работает в безопасном режиме и не отбирает endpoint у другого пользователя.
 
-## Retry policy
+## 6. Presentation
 
-Retries are per device. Successful devices are never resent merely because another device failed. Default delays are 60 seconds, 5 minutes, 30 minutes, 2 hours, 6 hours, and 24 hours, capped by both maximum attempts and delivery TTL.
+Фоновый канал:
 
-## Observability
+```text
+Delivery → WebPush → browser/PWA service worker → native notification
+```
 
-The schema distinguishes:
+Открытая вкладка:
 
-- push-service acceptance;
-- browser service-worker receipt;
-- notification click.
+```text
+Delivery → private MessageBus channel → sound + blinking document.title
+```
 
-This is intentionally more precise than treating an HTTP success from the push endpoint as delivery to the user.
+Service worker отправляет ACK по непрогнозируемому token, а не по авторизованной cookie-сессии.
+
+## 7. Fail-open migration
+
+До включения `reliable_push_replace_core_web_push` core sender остаётся активным.
+
+После включения:
+
+- `handled` и `suppressed` не вызывают core sender;
+- `failed` и исключения вызывают `super`.
+
+Это предотвращает потерю уведомления при сбое плагина.

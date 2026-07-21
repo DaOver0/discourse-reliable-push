@@ -1,30 +1,116 @@
-# discourse-reliable-push
+# Discourse Reliable Push — исправленная версия
 
-A server-side Discourse plugin that replaces the browser-delivery portion of Discourse Web Push with a durable, observable outbox and per-device retry queue.
+Плагин создаёт собственный надёжный контур доставки Web Push для Discourse:
 
-## What it does
+```text
+событие → определение получателей → Delivery/Attempt outbox → Web Push
+                                      ↘ ACK received/opened
+                                      ↘ MessageBus: звук и мигание вкладки
+```
 
-- Captures Discourse `push_notification` events before core delivery.
-- Captures persisted `notification_created` events, including badge and plugin notification types.
-- Covers topic replies, mentions, private messages, Discourse Chat messages/mentions, badges, and other personal notifications.
-- Can push every new regular post in every visible topic to subscribed users, except the author, users who muted that topic, users in Do Not Disturb, and users without topic access.
-- Optionally broadcasts every new public topic to members of configured groups.
-- Keeps the existing Discourse browser `PushSubscription` and VAPID keys, but mirrors subscriptions into plugin-owned multi-device storage.
-- Suppresses only `PushNotificationPusher.push` when replacement mode is enabled. In-app MessageBus notifications and Discourse Hub remain intact.
-- Stores one delivery per semantic user event and one attempt per browser device.
-- Retries network errors, HTTP 429, and server errors with configurable backoff.
-- Disables expired subscriptions on HTTP 404/410 or `WebPush::ExpiredSubscription`.
-- Re-checks topic/chat access immediately before every delivery attempt.
-- Records accepted, service-worker received, and notification-opened timestamps.
-- Exposes authenticated user status and an administrator-only aggregate health endpoint.
+Версия в этом архиве: **0.3.0**.
 
-## Status
+## Что исправлено
 
-This repository is an implementation-ready MVP. Ruby/JavaScript/YAML syntax is validated in the repository, but full integration tests must run inside a matching Discourse checkout because Discourse models, Sidekiq, PostgreSQL, and the plugin test harness are runtime dependencies.
+### Новые сообщения и темы
 
-## Installation
+Первая версия ожидала, что Discourse создаст персональное уведомление для каждого обычного сообщения. Это неверно для режимов «Следить» и «Уведомлять»: там стандартное персональное уведомление создаётся только для ответа/упоминания.
 
-In your Discourse container configuration:
+Теперь плагин использует `post_alerter_after_save_post` и самостоятельно делает fanout:
+
+- первый пост → `new_topic`;
+- последующие посты → `topic_post`;
+- получатели — все пользователи с Push-подпиской, кроме автора;
+- исключаются пользователи, которые не видят тему;
+- учитываются mute темы, категории и тегов;
+- учитывается `watched_precedence_over_muted`;
+- повторная проверка ACL/mute/DND выполняется непосредственно перед отправкой.
+
+Таким образом, «незаглушённая тема» означает не только `TopicUser != muted`, но и отсутствие действующего заглушения категории/тега.
+
+### Подписки браузеров
+
+Fanout раньше зависел от отдельной таблицы плагина. Если пользователь не открыл сайт после установки, его стандартная `PushSubscription` не попадала в эту таблицу и доставка заканчивалась `no_subscription`.
+
+Теперь:
+
+- получатели выбираются как по стандартным `PushSubscription`, так и по зеркалу плагина;
+- перед доставкой стандартные подписки автоматически импортируются;
+- клиент дополнительно синхронизирует текущую подписку;
+- при появлении подписки повторно запускаются свежие доставки `no_subscription`.
+
+### Устойчивость очереди и параллельное выполнение
+
+Исправлены гонки, из-за которых повторные Sidekiq jobs могли отправить один и тот же payload дважды или понизить состояние уже подтверждённой доставки:
+
+- подготовка `Delivery` и отправка `Attempt` захватываются атомарным SQL-переходом состояния;
+- `accepted → received → opened` не понижается поздними ответами другого устройства;
+- повышение приоритета semantic duplicate выполняется под блокировкой строки;
+- ошибки одного устройства не переводят успешно доставленное событие в `failed`;
+- зависшие `pending`/`preparing`/`sending` и просроченные `retrying` записи восстанавливаются плановым job каждые 10 минут;
+- исчерпанные или отключённые endpoints завершают логическую доставку, а не оставляют её навсегда в `preparing`;
+- счётчик ошибок подписки обновляется атомарно;
+- server-side mirror не может присвоить endpoint, уже подтверждённый другим вошедшим пользователем.
+
+Контур даёт **at-least-once** доставку. При сетевом тайм-ауте после фактического принятия Push-сервисом теоретически возможен повтор: Web Push не предоставляет транзакционного exactly-once подтверждения. `tag` и semantic dedupe уменьшают визуальные дубли.
+
+### Перехват стандартного Web Push
+
+Исправлена опасная семантика `:skipped`: старая версия могла подавить стандартный Push даже при ошибке/неполной обработке.
+
+Новая логика:
+
+- `handled` — событие записано в outbox, стандартный sender не вызывается;
+- `suppressed` — событие намеренно отключено DND/настройкой;
+- `failed` — обязательный fallback в `PushNotificationPusher.push`;
+- исключение в плагине — обязательный fallback в core.
+
+`reliable_push_replace_core_web_push` теперь по умолчанию **false**. Включать его следует только после проверки подписок и тестовой доставки.
+
+### События
+
+Реализованы отдельные категории событий:
+
+- сообщения Chat;
+- упоминания, ответы и цитаты;
+- личные сообщения;
+- все новые сообщения в незаглушённых темах;
+- новые темы;
+- новые категории;
+- награды;
+- события аккаунта;
+- прочие стандартные и plugin-defined `Notification`;
+- вход пользователей в комнаты Resenha.
+
+Для каждой категории есть site setting и пользовательская настройка в `reliable_push_preferences`.
+
+### Resenha
+
+Текущая реализация Resenha обновляет `ParticipantTracker`, но не публикует стабильное событие входа. Плагин:
+
+1. поддерживает будущие события `resenha_user_joined_room` и `resenha_participant_joined`;
+2. при наличии Resenha безопасно добавляет адаптер к `Resenha::ParticipantTracker.add`;
+3. отличает новый вход от очередного presence refresh;
+4. использует временное окно дедупликации;
+5. проверяет `Guardian#can_see_resenha_room?`;
+6. исключает вошедшего пользователя из получателей.
+
+Для ограничения аудитории задайте `reliable_push_resenha_group_ids`.
+
+### DND, звук и мигание вкладки
+
+- DND проверяется через доступный API текущей версии Discourse (`do_not_disturb?`/`in_do_not_disturb?`) либо по активному интервалу `do_not_disturb_timings` — при создании и непосредственно перед отправкой.
+- Открытая вкладка получает событие через приватный MessageBus-канал.
+- После первого действия пользователя в браузере Web Audio воспроизводит короткий сигнал.
+- При скрытой вкладке заголовок мигает и показывает число новых событий.
+- При возврате во вкладку заголовок восстанавливается.
+- Для фонового браузера и Android/PWA используется Web Push Discourse.
+
+Ограничение платформы: браузеры не разрешают произвольно воспроизводить звук до первого жеста пользователя. Системный звук закрытой вкладки определяется браузером/Android/ОС; Web Push не гарантирует пользовательский аудиофайл.
+
+## Установка
+
+В `app.yml`:
 
 ```yaml
 hooks:
@@ -35,99 +121,172 @@ hooks:
           - git clone https://github.com/DaOver0/discourse-reliable-push.git
 ```
 
-Then rebuild the container:
+Для проверки архива скопируйте папку в:
+
+```text
+/var/discourse/containers/app.yml → plugins/discourse-reliable-push
+```
+
+После замены исходников:
 
 ```bash
 cd /var/discourse
 ./launcher rebuild app
 ```
 
-Enable `reliable_push_enabled` in **Admin → Settings → Plugins**.
+Миграции создадут:
 
-## Migration strategy
+- `reliable_push_subscriptions`;
+- `reliable_push_deliveries`;
+- `reliable_push_attempts`;
+- `reliable_push_preferences`.
 
-1. Install the plugin with `reliable_push_replace_core_web_push` disabled.
-2. Ask users with existing push permission to open the forum once. The client initializer mirrors their active subscription.
-3. Check `/reliable-push/status.json` while logged in and confirm `active_subscriptions` is non-zero.
-4. Inspect `/reliable-push/admin/status.json` as an administrator for aggregate delivery health.
-5. Enable `reliable_push_replace_core_web_push`.
-6. Watch Sidekiq and Rails logs for `Reliable Push` errors.
+## Безопасное включение
 
-Core's notification permission UI remains the enrollment mechanism. This avoids attempting to register a second root service worker or a second Push API subscription.
+### Этап 1 — транспорт работает параллельно core
 
-## New-topic broadcasts
-
-Broadcasts are off by default. To enable them:
-
-- enable `reliable_push_broadcast_new_topics`;
-- put numeric Discourse group IDs in `reliable_push_broadcast_group_ids`;
-- set a conservative `reliable_push_broadcast_max_recipients`.
-
-Every recipient is checked with `Guardian#can_see?` before event creation and again immediately before delivery. Private-message topics are never broadcast.
-
-## Every new topic post
-
-Enable `reliable_push_notify_all_topic_posts` to push every new regular post.
-
-- Leave `reliable_push_all_topic_posts_group_ids` empty to target every user
-  with an active browser Push subscription.
-- Add numeric group IDs to restrict the fan-out to those groups.
-- Set `reliable_push_all_topic_posts_max_recipients` to a safe upper limit per
-  post.
-
-The post author is excluded. Private messages, whispers, small actions,
-deleted or hidden posts, and unlisted topics are not broadcast. Topic ACLs are
-checked before the delivery is created and again before every delivery attempt.
-A user whose topic notification level is **Muted**, or whose **Do Not Disturb**
-schedule is active, receives no push.
-
-Personal post events and the broad fan-out share one per-user/per-post dedupe
-key. A mention, direct reply, quote, or watched-topic notification therefore
-wins by priority and does not produce a second generic notification for the
-same post.
-
-## Delivery states
-
-Delivery states:
-
-- `pending`
-- `preparing`
-- `accepted` — push service accepted the encrypted message
-- `received` — the browser service worker received the event
-- `opened` — the user clicked the notification
-- `no_subscription`
-- `expired`
-- `failed`
-- `cancelled`
-
-`accepted` does not prove that a human saw the notification. The service-worker acknowledgement provides a stronger device-level signal, while `opened` is the explicit interaction signal.
-
-## Security properties
-
-- No second service worker registration is created.
-- ACK routes use a per-delivery random token and do not expose message contents.
-- Topic and chat ACLs are checked before each attempt.
-- Push endpoint credentials stay server-side after synchronization.
-- A browser endpoint is globally owned by one account, preventing account-switch notification leakage.
-- A browser subscription is disabled when the browser reports it as expired.
-
-## Known limitations
-
-- Desktop push still depends on the browser/OS background process. A fully terminated browser may delay delivery.
-- The plugin uses the forum's existing VAPID keys. Changing VAPID keys requires users to create new browser subscriptions.
-- Per-user event-category preferences are not included in the MVP; browser permission, core subscription state, DND, and site-wide settings are respected.
-- Full compatibility must be verified against the exact Discourse commit used by the forum before production rollout.
-
-## Development
-
-Place this repository under `plugins/discourse-reliable-push` in a Discourse development checkout, migrate, and run:
-
-```bash
-bundle exec rake db:migrate
-bundle exec rspec plugins/discourse-reliable-push/spec
-bin/lint plugins/discourse-reliable-push
+```text
+reliable_push_enabled = true
+reliable_push_replace_core_web_push = false
+reliable_push_topic_events_enabled = true
+reliable_push_topic_posts_enabled = true
+reliable_push_new_topics_enabled = true
 ```
 
-## License
+Откройте сайт пользователем с разрешёнными Push-уведомлениями. Затем проверьте:
 
-MIT
+```text
+GET /reliable-push/status
+```
+
+Ожидается `active_subscriptions > 0`.
+
+Создайте сообщение другим пользователем. В Rails console:
+
+```ruby
+user = User.find_by(username: "recipient")
+ReliablePush::Delivery.where(user_id: user.id).order(id: :desc).limit(20).pluck(
+  :id, :kind, :state, :last_error
+)
+```
+
+### Этап 2 — заменить core sender
+
+Когда сообщения, чат и упоминания успешно проходят состояния `accepted`/`received`:
+
+```text
+reliable_push_replace_core_web_push = true
+```
+
+После этого стандартные персональные Web Push события проходят через outbox плагина. Внутренний список уведомлений Discourse и MessageBus не удаляются: они остаются источником UI и непрочитанных счётчиков, а отправка Web Push заменяется.
+
+## Диагностика состояний
+
+| Состояние | Значение |
+|---|---|
+| `pending` | событие создано |
+| `preparing` | подписки найдены, создаются попытки |
+| `accepted` | Push-сервис принял сообщение |
+| `received` | service worker получил payload |
+| `opened` | пользователь нажал уведомление |
+| `no_subscription` | активной подписки нет |
+| `cancelled` | DND, preference, ACL или mute запретили отправку |
+| `failed` | попытки исчерпаны |
+| `expired` | истёк TTL |
+
+Администраторский статус:
+
+```text
+GET /reliable-push/admin/status
+```
+
+## Пользовательские настройки
+
+JSON API:
+
+```http
+GET /reliable-push/preferences
+```
+
+```http
+PUT /reliable-push/preferences
+Content-Type: application/json
+
+{
+  "preferences": {
+    "topic_posts": true,
+    "new_topics": true,
+    "chat_messages": true,
+    "mentions_replies": true,
+    "private_messages": true,
+    "badges": true,
+    "account_events": true,
+    "new_categories": true,
+    "resenha": true,
+    "other": true,
+    "sound": true,
+    "tab_blink": true
+  }
+}
+```
+
+В браузере плагин также предоставляет:
+
+```javascript
+await ReliablePushPreferences.load();
+await ReliablePushPreferences.save({ topic_posts: false, sound: true });
+```
+
+Серверная модель и API пользовательских настроек готовы. Графическая форма в профиле намеренно не включена: outlet страницы настроек меняется между версиями Discourse, а без запуска на целевой версии непроверенный Glimmer-коннектор мог бы сломать клиентскую сборку. До добавления проверенной формы настройки доступны через API и `ReliablePushPreferences`.
+
+## Проверка вручную
+
+Используйте двух пользователей и два браузерных профиля.
+
+1. Получатель разрешает уведомления и имеет `active_subscriptions > 0`.
+2. Отправитель создаёт обычный ответ без `@mention`.
+3. Для получателя тема, категория и теги не заглушены.
+4. Получатель не находится в DND.
+5. Проверяется `Delivery.kind == "topic_post"`.
+6. Проверяется `Attempt.state == "accepted"`.
+7. Проверяется ACK `received`.
+8. Повторяется тест для первой публикации новой темы.
+9. Повторяется для read-restricted категории с пользователем без доступа: доставка не должна создаваться/отправляться.
+10. Повторяется с muted category и watched topic при обоих значениях `watched_precedence_over_muted`.
+
+## Автоматические проверки в архиве
+
+Перед упаковкой выполнены:
+
+```bash
+ruby -c                  # для каждого Ruby-файла
+YAML.load_file           # settings и locale
+node --check             # initializer и service worker
+require_relative audit   # все локальные пути из plugin.rb существуют
+unzip -t                 # проверка целостности итогового архива
+```
+
+Подробный отчёт находится в `VALIDATION.md`.
+
+Полные RSpec/integration tests требуют checkout совместимой версии Discourse, PostgreSQL, Redis и установленных Chat/Resenha. Они не могут подтвердиться одной только статической проверкой плагина.
+
+## Важные замечания по нагрузке
+
+Требование «каждый новый пост всем пользователям, у которых контекст не muted» создаёт fanout порядка:
+
+```text
+число новых постов × число Push-пользователей
+```
+
+На большом форуме это дорого. Используйте:
+
+- `reliable_push_max_fanout`;
+- `reliable_push_topic_group_ids`;
+- ограничение TTL;
+- мониторинг Sidekiq;
+- retention cleanup;
+- пользовательские preferences.
+
+## Лицензия
+
+MIT — см. `LICENSE`.

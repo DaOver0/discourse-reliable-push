@@ -10,31 +10,40 @@ RSpec.describe Jobs::ReliablePushBroadcastTopicPost do
   before do
     SiteSetting.reliable_push_enabled = true
     SiteSetting.reliable_push_post_notifications = true
-    SiteSetting.reliable_push_notify_all_topic_posts = true
-    SiteSetting.reliable_push_respect_do_not_disturb = false
+    SiteSetting.reliable_push_topic_events_enabled = true
+    SiteSetting.reliable_push_topic_posts_enabled = true
+    SiteSetting.reliable_push_new_topics_enabled = true
+    SiteSetting.reliable_push_max_fanout = 100
 
-    [recipient, muted_user].each_with_index do |user, index|
-      ReliablePush::Subscription.create!(
-        user: user,
-        endpoint_digest: Digest::SHA256.hexdigest("https://push.example/#{index}"),
-        endpoint: "https://push.example/#{index}",
-        p256dh: "p256dh-#{index}",
-        auth: "auth-#{index}",
-      )
-    end
-
-    TopicUser.change(
-      muted_user.id,
-      topic.id,
+    ReliablePush::Subscription.sync!(
+      user: recipient,
+      subscription: {
+        endpoint: "https://push.test/recipient",
+        keys: { p256dh: "recipient-key", auth: "recipient-auth" },
+      },
+    )
+    ReliablePush::Subscription.sync!(
+      user: muted_user,
+      subscription: {
+        endpoint: "https://push.test/muted",
+        keys: { p256dh: "muted-key", auth: "muted-auth" },
+      },
+    )
+    TopicUser.create!(
+      user: muted_user,
+      topic: topic,
       notification_level: TopicUser.notification_levels[:muted],
     )
+
+    allow(Jobs).to receive(:enqueue)
+    allow(MessageBus).to receive(:publish)
   end
 
-  it "fans out to subscribed users but skips the author and topic-muted users" do
+  it "creates a delivery for an eligible subscribed user and excludes muted users" do
     described_class.new.execute(post_id: post.id)
 
-    expect(ReliablePush::Delivery.where(user: recipient, source_type: "Post", source_id: post.id).exists?).to eq(true)
-    expect(ReliablePush::Delivery.where(user: muted_user, source_type: "Post", source_id: post.id).exists?).to eq(false)
-    expect(ReliablePush::Delivery.where(user: author, source_type: "Post", source_id: post.id).exists?).to eq(false)
+    expect(ReliablePush::Delivery.where(user: recipient, source_type: "Post", source_id: post.id)).to exist
+    expect(ReliablePush::Delivery.where(user: muted_user, source_type: "Post", source_id: post.id)).not_to exist
+    expect(ReliablePush::Delivery.where(user: author, source_type: "Post", source_id: post.id)).not_to exist
   end
 end

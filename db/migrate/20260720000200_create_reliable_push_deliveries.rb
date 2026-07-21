@@ -20,7 +20,10 @@ class CreateReliablePushDeliveries < ActiveRecord::Migration[7.0]
       t.timestamps
     end
 
-    add_index :reliable_push_deliveries, %i[user_id dedupe_key], unique: true, name: "idx_reliable_push_deliveries_dedupe"
+    add_index :reliable_push_deliveries,
+              %i[user_id dedupe_key],
+              unique: true,
+              name: "idx_reliable_push_deliveries_dedupe"
     add_index :reliable_push_deliveries, :ack_token, unique: true
     add_index :reliable_push_deliveries, %i[state expires_at]
     add_index :reliable_push_deliveries, %i[source_type source_id]

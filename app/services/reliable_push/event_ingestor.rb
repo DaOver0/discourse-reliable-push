@@ -1,160 +1,359 @@
 # frozen_string_literal: true
 
-module ReliablePush
+module ::ReliablePush
   class EventIngestor
-    POST_TYPES = %i[mentioned group_mentioned replied quoted private_message invited_to_private_message watching_first_post watching_category_or_tag posted].freeze
-    CHAT_TYPES = %i[chat_mention chat_message chat_invitation chat_quoted chat_watched_thread].freeze
+    CHAT_TYPES = %w[
+      chat_message
+      chat_mention
+      chat_invitation
+      chat_quoted
+      chat_watched_thread
+    ].freeze
+
+    MENTION_REPLY_TYPES = %w[
+      mentioned
+      group_mentioned
+      replied
+      quoted
+      chat_mention
+      chat_quoted
+    ].freeze
+
+    PRIVATE_MESSAGE_TYPES = %w[
+      private_message
+      invited_to_private_message
+    ].freeze
+
+    ACCOUNT_TYPES = %w[
+      liked
+      linked
+      edited
+      bookmark_reminder
+      following
+      following_created_topic
+      moved_post
+      custom
+    ].freeze
 
     PRIORITIES = {
-      "chat_mention" => 100,
-      "mentioned" => 100,
-      "group_mentioned" => 95,
-      "private_message" => 90,
-      "replied" => 80,
-      "quoted" => 75,
-      "chat_message" => 70,
-      "watching_first_post" => 55,
-      "watching_category_or_tag" => 45,
-      "posted" => 40,
+      "chat_mention" => 110,
+      "mentioned" => 110,
+      "chat_quoted" => 108,
+      "group_mentioned" => 105,
+      "private_message" => 100,
+      "invited_to_private_message" => 100,
+      "replied" => 95,
+      "quoted" => 90,
+      "chat_message" => 85,
+      "chat_watched_thread" => 80,
+      "chat_invitation" => 80,
+      "posted" => 70,
+      "watching_category_or_tag" => 70,
+      "watching_first_post" => 65,
+      "new_topic" => 50,
+      "topic_post" => 45,
+      "new_category" => 35,
       "granted_badge" => 35,
+      "resenha_join" => 30,
     }.freeze
 
     class << self
       def from_core_push(user:, payload:)
-        return :skipped unless eligible_user?(user)
+        return Result.suppressed unless AccessChecker.eligible_user?(user)
 
-        payload = payload.to_h.with_indifferent_access
-        type = type_name(payload[:notification_type])
-        return :skipped unless enabled_type?(type)
+        normalized = normalize(payload)
+        type = type_name(normalized["notification_type"] || normalized["type"])
+        attach_recent_notification_id!(user: user, type: type, payload: normalized)
+        preference_key = preference_key_for(type, payload: normalized)
+        return Result.suppressed unless PreferenceResolver.enabled?(user, preference_key)
 
-        message = PayloadBuilder.from_core_payload(user:, payload:)
+        message = PayloadBuilder.from_core_payload(user: user, payload: normalized)
+        message["preference_key"] = preference_key.to_s
+
         ingest(
           user: user,
           kind: type,
-          dedupe_key: dedupe_key(type:, payload:),
+          preference_key: preference_key,
+          dedupe_key: dedupe_key(type: type, payload: normalized),
           payload: message,
-          priority: PRIORITIES.fetch(type, 10),
-          source_type: source_type(payload),
-          source_id: source_id(payload),
+          priority: PRIORITIES.fetch(type, 20),
+          source_type: source_type(normalized),
+          source_id: source_id(normalized),
         )
       rescue StandardError => e
-        Discourse.warn_exception(e, message: "Reliable Push failed to ingest core push", env: { user_id: user&.id })
+        Discourse.warn_exception(
+          e,
+          message: "Reliable Push failed to ingest core push",
+          env: { user_id: user&.id },
+        )
+        Result.failed(e)
       end
 
       def from_notification(notification)
         user = notification.user
-        return unless eligible_user?(user)
+        return Result.suppressed unless AccessChecker.eligible_user?(user)
 
         type = type_name(notification.notification_type)
-        return unless enabled_type?(type)
+        notification_data = parse_notification_data(notification.data)
+        if notification.respond_to?(:post_number)
+          notification_data["post_number"] ||= notification.post_number
+        end
+        preference_key = preference_key_for(type, payload: notification_data)
+        return Result.suppressed unless PreferenceResolver.enabled?(user, preference_key)
 
         payload = PayloadBuilder.from_notification(notification)
-        semantic_payload = payload.merge(
-          post_id: payload["post_id"],
-          chat_message_id: payload["chat_message_id"],
-          topic_id: notification.topic_id,
-          notification_id: notification.id,
-        ).with_indifferent_access
+        payload["preference_key"] = preference_key.to_s
+        semantic =
+          normalize(payload).merge(normalize(payload["data"])).merge(
+            "notification_id" => notification.id,
+            "topic_id" => notification.topic_id,
+          )
 
         ingest(
           user: user,
           kind: type,
-          dedupe_key: dedupe_key(type:, payload: semantic_payload),
+          preference_key: preference_key,
+          dedupe_key: dedupe_key(type: type, payload: semantic),
           payload: payload,
-          priority: PRIORITIES.fetch(type, 10),
-          source_type: "Notification",
-          source_id: notification.id,
+          priority: PRIORITIES.fetch(type, 20),
+          source_type: notification_source_type(notification, semantic),
+          source_id: notification_source_id(notification, semantic),
         )
       rescue StandardError => e
-        Discourse.warn_exception(e, message: "Reliable Push failed to ingest notification", env: { notification_id: notification&.id })
+        Discourse.warn_exception(
+          e,
+          message: "Reliable Push failed to ingest notification",
+          env: { notification_id: notification&.id },
+        )
+        Result.failed(e)
       end
 
-      def broadcast_new_topic(user:, post:)
-        return unless eligible_user?(user)
-        return if AccessChecker.topic_muted?(user:, topic_id: post.topic_id)
-        payload = PayloadBuilder.for_new_topic_broadcast(user:, post:)
+      def topic_post(user:, post:)
+        kind = post.post_number == 1 ? "new_topic" : "topic_post"
+        preference_key = post.post_number == 1 ? :new_topics : :topic_posts
+        return Result.suppressed unless PreferenceResolver.enabled?(user, preference_key)
+        return Result.suppressed unless AccessChecker.allowed_topic_post?(user: user, post: post)
+
+        payload =
+          I18n.with_locale(user.effective_locale) do
+            PayloadBuilder.for_topic_post(post: post, kind: kind)
+          end
+        payload["preference_key"] = preference_key.to_s
+
         ingest(
           user: user,
-          kind: "broadcast_new_topic",
-          dedupe_key: post_dedupe_key(post.id),
+          kind: kind,
+          preference_key: preference_key,
+          dedupe_key: "post:#{post.id}",
           payload: payload,
-          priority: 30,
+          priority: PRIORITIES.fetch(kind),
           source_type: "Post",
           source_id: post.id,
         )
       end
 
-      def broadcast_topic_post(user:, post:)
-        return unless SiteSetting.reliable_push_post_notifications
-        return unless eligible_user?(user)
-        return if user.id == post.user_id
-        return unless Guardian.new(user).can_see?(post.topic)
-        return if AccessChecker.topic_muted?(user:, topic_id: post.topic_id)
+      def new_category(user:, category:)
+        return Result.suppressed unless PreferenceResolver.enabled?(user, :new_categories)
+        return Result.suppressed unless AccessChecker.allowed_category?(user: user, category: category)
 
-        payload = PayloadBuilder.for_topic_post_broadcast(user:, post:)
+        payload =
+          I18n.with_locale(user.effective_locale) do
+            PayloadBuilder.for_category(category: category)
+          end
+        payload["preference_key"] = "new_categories"
+
         ingest(
           user: user,
-          kind: post.post_number == 1 ? "broadcast_new_topic" : "broadcast_topic_post",
-          dedupe_key: post_dedupe_key(post.id),
+          kind: "new_category",
+          preference_key: :new_categories,
+          dedupe_key: "category:created:#{category.id}",
           payload: payload,
-          priority: post.post_number == 1 ? 30 : 25,
-          source_type: "Post",
-          source_id: post.id,
+          priority: PRIORITIES.fetch("new_category"),
+          source_type: "Category",
+          source_id: category.id,
+        )
+      end
+
+      def resenha_join(user:, room:, joining_user:)
+        return Result.suppressed unless PreferenceResolver.enabled?(user, :resenha)
+        return Result.suppressed unless AccessChecker.allowed_resenha_room?(user: user, room: room)
+
+        bucket =
+          Time.zone.now.to_i /
+            [SiteSetting.reliable_push_resenha_join_cooldown_seconds.to_i, 30].max
+        payload =
+          I18n.with_locale(user.effective_locale) do
+            PayloadBuilder.for_resenha(room: room, joining_user: joining_user)
+          end
+        payload["preference_key"] = "resenha"
+
+        ingest(
+          user: user,
+          kind: "resenha_join",
+          preference_key: :resenha,
+          dedupe_key: "resenha:join:#{room.id}:#{joining_user.id}:#{bucket}",
+          payload: payload,
+          priority: PRIORITIES.fetch("resenha_join"),
+          source_type: "Resenha::Room",
+          source_id: room.id,
         )
       end
 
       private
 
-      def ingest(**attributes)
-        Delivery.ingest!(**attributes)
+      def ingest(user:, kind:, preference_key:, dedupe_key:, payload:, priority:, source_type:, source_id:)
+        return Result.suppressed unless AccessChecker.eligible_user?(user)
+        return Result.suppressed unless PreferenceResolver.enabled?(user, preference_key)
+
+        delivery, changed =
+          Delivery.ingest!(
+            user: user,
+            kind: kind,
+            dedupe_key: dedupe_key,
+            payload: payload,
+            priority: priority,
+            source_type: source_type,
+            source_id: source_id,
+          )
+
+        if changed || delivery.pending? || delivery.no_subscription?
+          Jobs.enqueue(:reliable_push_prepare_delivery, delivery_id: delivery.id)
+        end
+        publish_live(delivery) if changed
+
+        Result.handled(delivery)
       end
 
-      def eligible_user?(user)
-        return false if user.blank? || user.bot? || user.suspended?
-        return false if SiteSetting.reliable_push_respect_do_not_disturb && user.do_not_disturb?
-        true
+      def publish_live(delivery)
+        MessageBus.publish(
+          "/reliable-push/#{delivery.user_id}",
+          PayloadBuilder.live_payload(delivery),
+          user_ids: [delivery.user_id],
+        )
+      rescue StandardError => e
+        Rails.logger.warn(
+          "[ReliablePush] live presentation publish failed for delivery #{delivery.id}: #{e.message}",
+        )
       end
 
-      def enabled_type?(type)
-        symbol = type.to_sym
-        return SiteSetting.reliable_push_chat_notifications if CHAT_TYPES.include?(symbol)
-        return SiteSetting.reliable_push_post_notifications if POST_TYPES.include?(symbol)
-        return SiteSetting.reliable_push_badge_notifications if symbol == :granted_badge
-        SiteSetting.reliable_push_other_notifications
+      def preference_key_for(type, payload: {})
+        return :mentions_replies if MENTION_REPLY_TYPES.include?(type)
+        return :chat_messages if CHAT_TYPES.include?(type)
+        return :private_messages if PRIVATE_MESSAGE_TYPES.include?(type)
+        return :badges if type == "granted_badge"
+        return :new_topics if type == "watching_first_post"
+        return :topic_posts if type == "posted"
+
+        if type == "watching_category_or_tag"
+          value = normalize(payload)
+          return value["post_number"].to_i == 1 ? :new_topics : :topic_posts
+        end
+
+        return :account_events if ACCOUNT_TYPES.include?(type)
+
+        :other
+      end
+
+      def attach_recent_notification_id!(user:, type:, payload:)
+        return if payload["notification_id"].present?
+        return if payload["post_id"].present? || payload["chat_message_id"].present?
+
+        numeric_type = Notification.types[type]
+        return if numeric_type.blank?
+
+        notification =
+          Notification
+            .where(user_id: user.id, notification_type: numeric_type)
+            .where("created_at > ?", 5.minutes.ago)
+            .order(id: :desc)
+            .first
+        payload["notification_id"] = notification.id if notification
+      rescue StandardError
+        nil
       end
 
       def type_name(value)
-        Notification.types[value].to_s.presence || value.to_s
+        mapping = Notification.types
+        string_value = value.to_s
+
+        return string_value if mapping.key?(string_value)
+
+        numeric = Integer(value, exception: false)
+        mapping.key(numeric).to_s.presence || string_value.presence || "other"
+      rescue StandardError
+        value.to_s.presence || "other"
       end
 
       def dedupe_key(type:, payload:)
-        if payload[:chat_message_id].present?
-          "chat:#{type}:#{payload[:chat_message_id]}"
-        elsif payload[:post_id].present?
-          post_dedupe_key(payload[:post_id])
-        elsif payload[:topic_id].present? && payload[:post_number].present?
-          "topic-post:#{payload[:topic_id]}:#{payload[:post_number]}"
-        elsif payload[:notification_id].present?
-          "notification:#{payload[:notification_id]}"
+        value = normalize(payload)
+        data = normalize(value["data"])
+        merged = value.merge(data)
+
+        if merged["chat_message_id"].present?
+          "chat:#{type}:#{merged["chat_message_id"]}"
+        elsif merged["post_id"].present?
+          "post:#{merged["post_id"]}"
+        elsif merged["topic_id"].present? && merged["post_number"].present?
+          "topic-post:#{merged["topic_id"]}:#{merged["post_number"]}"
+        elsif merged["notification_id"].present?
+          "notification:#{merged["notification_id"]}"
         else
-          digest = Digest::SHA256.hexdigest(payload.to_json).first(24)
+          digest = Digest::SHA256.hexdigest(value.to_json).first(24)
           "event:#{type}:#{digest}"
         end
       end
 
       def source_type(payload)
-        return "Chat::Message" if payload[:chat_message_id].present?
-        return "Post" if payload[:post_id].present?
-        return "Topic" if payload[:topic_id].present?
+        value = normalize(payload)
+        data = normalize(value["data"])
+        merged = value.merge(data)
+        return "Chat::Message" if merged["chat_message_id"].present?
+        return "Post" if merged["post_id"].present?
+        return "Topic" if merged["topic_id"].present?
+
         nil
       end
 
       def source_id(payload)
-        payload[:chat_message_id] || payload[:post_id] || payload[:topic_id]
+        value = normalize(payload)
+        data = normalize(value["data"])
+        merged = value.merge(data)
+        merged["chat_message_id"] || merged["post_id"] || merged["topic_id"]
       end
 
-      def post_dedupe_key(post_id)
-        "post:#{post_id}"
+      def notification_source_type(notification, semantic)
+        return "Chat::Message" if semantic["chat_message_id"].present?
+        return "Post" if semantic["post_id"].present?
+        return "Topic" if notification.topic_id.present?
+
+        "Notification"
+      end
+
+      def notification_source_id(notification, semantic)
+        semantic["chat_message_id"] ||
+          semantic["post_id"] ||
+          notification.topic_id ||
+          notification.id
+      end
+
+      def parse_notification_data(value)
+        return normalize(value) if value.is_a?(Hash) || value.respond_to?(:to_unsafe_h)
+
+        JSON.parse(value.to_s).deep_stringify_keys
+      rescue JSON::ParserError
+        {}
+      end
+
+      def normalize(value)
+        hash =
+          if value.respond_to?(:to_unsafe_h)
+            value.to_unsafe_h
+          elsif value.respond_to?(:to_h)
+            value.to_h
+          else
+            value || {}
+          end
+        hash.deep_stringify_keys
       end
     end
   end

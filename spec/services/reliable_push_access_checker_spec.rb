@@ -1,38 +1,37 @@
 # frozen_string_literal: true
 
 RSpec.describe ReliablePush::AccessChecker do
+  fab!(:author) { Fabricate(:user) }
   fab!(:user)
-  fab!(:topic)
-  fab!(:post) { Fabricate(:post, topic: topic) }
+  fab!(:category)
+  fab!(:topic) { Fabricate(:topic, user: author, category: category) }
+  fab!(:post) { Fabricate(:post, topic: topic, user: author) }
 
   before do
     SiteSetting.reliable_push_enabled = true
-    SiteSetting.reliable_push_respect_do_not_disturb = false
   end
 
-  it "rejects a delivery when the user muted its topic" do
-    TopicUser.change(
-      user.id,
-      topic.id,
+  it "rejects an explicitly muted topic" do
+    TopicUser.create!(
+      user: user,
+      topic: topic,
       notification_level: TopicUser.notification_levels[:muted],
     )
 
-    delivery = ReliablePush::Delivery.create!(
+    expect(described_class.allowed_topic_post?(user: user, post: post)).to eq(false)
+  end
+
+  it "rejects a topic in a muted category" do
+    CategoryUser.create!(
       user: user,
-      kind: "broadcast_topic_post",
-      dedupe_key: "post:#{post.id}",
-      payload: {
-        post_id: post.id,
-        topic_id: topic.id,
-        post_number: post.post_number,
-        title: "title",
-        body: "body",
-        url: post.url,
-      },
-      priority: 25,
-      expires_at: 1.hour.from_now,
+      category: category,
+      notification_level: CategoryUser.notification_levels[:muted],
     )
 
-    expect(described_class.allowed?(delivery)).to eq(false)
+    expect(described_class.allowed_topic_post?(user: user, post: post)).to eq(false)
+  end
+
+  it "rejects the author of the post" do
+    expect(described_class.allowed_topic_post?(user: author, post: post)).to eq(false)
   end
 end
