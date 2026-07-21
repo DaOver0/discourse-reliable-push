@@ -1,0 +1,54 @@
+plugins:
+  reliable_push_enabled:
+    default: false
+    client: true
+  reliable_push_replace_core_web_push:
+    default: true
+  reliable_push_respect_do_not_disturb:
+    default: true
+  reliable_push_post_notifications:
+    default: true
+  reliable_push_chat_notifications:
+    default: true
+  reliable_push_badge_notifications:
+    default: true
+  reliable_push_other_notifications:
+    default: true
+  reliable_push_broadcast_new_topics:
+    default: false
+  reliable_push_broadcast_group_ids:
+    default: ""
+    type: list
+    list_type: simple
+  reliable_push_broadcast_max_recipients:
+    default: 1000
+    min: 1
+    max: 100000
+  reliable_push_excerpt_length:
+    default: 240
+    min: 40
+    max: 1000
+  reliable_push_delivery_ttl_hours:
+    default: 72
+    min: 1
+    max: 720
+  reliable_push_retry_delays_seconds:
+    default: "60|300|1800|7200|21600|86400"
+    type: list
+    list_type: simple
+  reliable_push_max_attempts:
+    default: 8
+    min: 1
+    max: 20
+  reliable_push_open_timeout_seconds:
+    default: 5
+    min: 1
+    max: 60
+  reliable_push_read_timeout_seconds:
+    default: 10
+    min: 1
+    max: 120
+  reliable_push_retention_days:
+    default: 30
+    min: 1
+    max: 365
