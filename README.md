@@ -7,6 +7,7 @@ A server-side Discourse plugin that replaces the browser-delivery portion of Dis
 - Captures Discourse `push_notification` events before core delivery.
 - Captures persisted `notification_created` events, including badge and plugin notification types.
 - Covers topic replies, mentions, private messages, Discourse Chat messages/mentions, badges, and other personal notifications.
+- Can push every new regular post in every visible topic to subscribed users, except the author, users who muted that topic, users in Do Not Disturb, and users without topic access.
 - Optionally broadcasts every new public topic to members of configured groups.
 - Keeps the existing Discourse browser `PushSubscription` and VAPID keys, but mirrors subscriptions into plugin-owned multi-device storage.
 - Suppresses only `PushNotificationPusher.push` when replacement mode is enabled. In-app MessageBus notifications and Discourse Hub remain intact.
@@ -63,6 +64,27 @@ Broadcasts are off by default. To enable them:
 - set a conservative `reliable_push_broadcast_max_recipients`.
 
 Every recipient is checked with `Guardian#can_see?` before event creation and again immediately before delivery. Private-message topics are never broadcast.
+
+## Every new topic post
+
+Enable `reliable_push_notify_all_topic_posts` to push every new regular post.
+
+- Leave `reliable_push_all_topic_posts_group_ids` empty to target every user
+  with an active browser Push subscription.
+- Add numeric group IDs to restrict the fan-out to those groups.
+- Set `reliable_push_all_topic_posts_max_recipients` to a safe upper limit per
+  post.
+
+The post author is excluded. Private messages, whispers, small actions,
+deleted or hidden posts, and unlisted topics are not broadcast. Topic ACLs are
+checked before the delivery is created and again before every delivery attempt.
+A user whose topic notification level is **Muted**, or whose **Do Not Disturb**
+schedule is active, receives no push.
+
+Personal post events and the broad fan-out share one per-user/per-post dedupe
+key. A mention, direct reply, quote, or watched-topic notification therefore
+wins by priority and does not produce a second generic notification for the
+same post.
 
 ## Delivery states
 

@@ -75,6 +75,28 @@ module ReliablePush
         end
       end
 
+      def for_topic_post_broadcast(user:, post:)
+        I18n.with_locale(user.effective_locale) do
+          if post.post_number == 1
+            return for_new_topic_broadcast(user:, post:)
+          end
+
+          build_message(
+            title: I18n.t("reliable_push.titles.broadcast_topic_post", topic: post.topic.title),
+            body: post.excerpt(
+              SiteSetting.reliable_push_excerpt_length,
+              text_entities: true,
+              strip_links: true,
+              remap_emoji: true,
+              plain_hashtags: true,
+            ),
+            url: post.url,
+            tag: "#{Discourse.current_hostname}-broadcast-post-#{post.id}",
+            metadata: { post_id: post.id, topic_id: post.topic_id, post_number: post.post_number },
+          )
+        end
+      end
+
       def with_delivery(message, delivery)
         data = message.deep_dup.with_indifferent_access
         ack = {

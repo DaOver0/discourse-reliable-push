@@ -8,6 +8,16 @@ plugins:
     default: true
   reliable_push_post_notifications:
     default: true
+  reliable_push_notify_all_topic_posts:
+    default: false
+  reliable_push_all_topic_posts_group_ids:
+    default: ""
+    type: list
+    list_type: simple
+  reliable_push_all_topic_posts_max_recipients:
+    default: 10000
+    min: 1
+    max: 1000000
   reliable_push_chat_notifications:
     default: true
   reliable_push_badge_notifications:

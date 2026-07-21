@@ -71,13 +71,33 @@ module ReliablePush
 
       def broadcast_new_topic(user:, post:)
         return unless eligible_user?(user)
+        return if AccessChecker.topic_muted?(user:, topic_id: post.topic_id)
         payload = PayloadBuilder.for_new_topic_broadcast(user:, post:)
         ingest(
           user: user,
           kind: "broadcast_new_topic",
-          dedupe_key: "broadcast-topic:#{post.topic_id}",
+          dedupe_key: post_dedupe_key(post.id),
           payload: payload,
           priority: 30,
+          source_type: "Post",
+          source_id: post.id,
+        )
+      end
+
+      def broadcast_topic_post(user:, post:)
+        return unless SiteSetting.reliable_push_post_notifications
+        return unless eligible_user?(user)
+        return if user.id == post.user_id
+        return unless Guardian.new(user).can_see?(post.topic)
+        return if AccessChecker.topic_muted?(user:, topic_id: post.topic_id)
+
+        payload = PayloadBuilder.for_topic_post_broadcast(user:, post:)
+        ingest(
+          user: user,
+          kind: post.post_number == 1 ? "broadcast_new_topic" : "broadcast_topic_post",
+          dedupe_key: post_dedupe_key(post.id),
+          payload: payload,
+          priority: post.post_number == 1 ? 30 : 25,
           source_type: "Post",
           source_id: post.id,
         )
@@ -111,9 +131,9 @@ module ReliablePush
         if payload[:chat_message_id].present?
           "chat:#{type}:#{payload[:chat_message_id]}"
         elsif payload[:post_id].present?
-          "post:#{type}:#{payload[:post_id]}"
+          post_dedupe_key(payload[:post_id])
         elsif payload[:topic_id].present? && payload[:post_number].present?
-          "topic-post:#{type}:#{payload[:topic_id]}:#{payload[:post_number]}"
+          "topic-post:#{payload[:topic_id]}:#{payload[:post_number]}"
         elsif payload[:notification_id].present?
           "notification:#{payload[:notification_id]}"
         else
@@ -131,6 +151,10 @@ module ReliablePush
 
       def source_id(payload)
         payload[:chat_message_id] || payload[:post_id] || payload[:topic_id]
+      end
+
+      def post_dedupe_key(post_id)
+        "post:#{post_id}"
       end
     end
   end

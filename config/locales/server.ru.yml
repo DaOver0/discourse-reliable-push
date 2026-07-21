@@ -4,6 +4,9 @@ ru:
     reliable_push_replace_core_web_push: "Заменить браузерную Web Push-доставку Discourse, сохранив уведомления внутри сайта и Discourse Hub"
     reliable_push_respect_do_not_disturb: "Учитывать режим «Не беспокоить» пользователя"
     reliable_push_post_notifications: "Отправлять уведомления о темах, ответах, упоминаниях, цитатах и личных сообщениях"
+    reliable_push_notify_all_topic_posts: "Уведомлять подписанных пользователей о каждом новом сообщении во всех доступных темах"
+    reliable_push_all_topic_posts_group_ids: "Необязательные ID групп для уведомлений обо всех сообщениях; оставьте пустым для всех пользователей с Push-подпиской"
+    reliable_push_all_topic_posts_max_recipients: "Максимум получателей уведомления об одном сообщении темы"
     reliable_push_chat_notifications: "Отправлять уведомления о сообщениях и упоминаниях Discourse Chat"
     reliable_push_badge_notifications: "Отправлять уведомления о достижениях"
     reliable_push_other_notifications: "Отправлять остальные персональные уведомления"
@@ -36,6 +39,7 @@ ru:
       chat_watched_thread: "Новое сообщение в отслеживаемой ветке чата"
       generic: "Новое уведомление"
       broadcast_new_topic: "Новая тема"
+      broadcast_topic_post: "Новое сообщение в теме «%{topic}»"
     bodies:
       generic: "Откройте форум, чтобы посмотреть уведомление."
       badge: "Вы получили достижение «%{badge}»."

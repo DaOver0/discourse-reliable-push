@@ -4,6 +4,9 @@ en:
     reliable_push_replace_core_web_push: "Replace Discourse browser Web Push delivery while preserving in-app and Hub notifications"
     reliable_push_respect_do_not_disturb: "Respect each user's Do Not Disturb schedule"
     reliable_push_post_notifications: "Deliver topic, reply, mention, quote, and private-message notifications"
+    reliable_push_notify_all_topic_posts: "Push every new post in every visible topic to subscribed users"
+    reliable_push_all_topic_posts_group_ids: "Optional group IDs for all-topic-post pushes; leave empty for every subscribed user"
+    reliable_push_all_topic_posts_max_recipients: "Maximum recipients for one all-topic-post push"
     reliable_push_chat_notifications: "Deliver Discourse Chat message and mention notifications"
     reliable_push_badge_notifications: "Deliver badge notifications"
     reliable_push_other_notifications: "Deliver other personal notification types"
@@ -36,6 +39,7 @@ en:
       chat_watched_thread: "New message in a watched chat thread"
       generic: "New notification"
       broadcast_new_topic: "New topic"
+      broadcast_topic_post: "New post in %{topic}"
     bodies:
       generic: "Open the forum to view this notification."
       badge: "You received the badge %{badge}."
