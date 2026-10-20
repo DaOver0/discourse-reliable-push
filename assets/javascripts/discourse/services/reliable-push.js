@@ -280,8 +280,7 @@ export default class ReliablePushService extends Service {
     await this.check({ force: true });
   }
 
-  @action
-  async sendTest() {
+  async _sendTest(background = false) {
     if (!this.canTest) {
       return;
     }
@@ -296,15 +295,32 @@ export default class ReliablePushService extends Service {
       }
       const result = await ajax("/reliable-push/test", {
         type: "POST",
-        data: { subscription: subscription.toJSON() },
+        data: { subscription: subscription.toJSON(), background },
       });
-      this.testResult = result.queued
-        ? "discourse_reliable_push.test_queued"
-        : "discourse_reliable_push.test_failed";
+      if (result.queued) {
+        this.testResult = background
+          ? "discourse_reliable_push.background_test_queued"
+          : "discourse_reliable_push.test_queued";
+      } else {
+        this.testResult =
+          result.reason === "do_not_disturb"
+            ? "discourse_reliable_push.test_dnd"
+            : "discourse_reliable_push.test_failed";
+      }
     } catch {
       this.testResult = "discourse_reliable_push.test_failed";
     } finally {
       this.busy = false;
     }
+  }
+
+  @action
+  async sendTest() {
+    await this._sendTest(false);
+  }
+
+  @action
+  async sendBackgroundTest() {
+    await this._sendTest(true);
   }
 }

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 # name: discourse-reliable-push
 # about: Health checks and opt-in repair of native Discourse Web Push for installed PWAs.
-# version: 0.1.0
+# version: 0.1.1
 # authors: discourse-reliable-push contributors
 # required_version: 2.9.0
 

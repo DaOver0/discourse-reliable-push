@@ -42,6 +42,11 @@ module Jobs
           read_timeout: PushNotificationPusher::CONNECTION_TIMEOUT_SECONDS,
           ssl_timeout: PushNotificationPusher::CONNECTION_TIMEOUT_SECONDS,
         )
+        # Provider acceptance is not proof of OS display or user receipt.
+        Rails.logger.info(
+          "[discourse-reliable-push] test push accepted by provider " \
+            "user_id=#{user.id} subscription_id=#{subscription.id}",
+        )
       end
     rescue WebPush::ExpiredSubscription
       subscription&.destroy!

@@ -36,13 +36,22 @@ module DiscourseReliablePush
       subscription = own_subscription
       raise Discourse::NotFound unless subscription
 
+      # The diagnostic test would otherwise be silently skipped by the job.
+      # This is a controlled endpoint; no arbitrary delayed-job arguments are accepted.
+      if current_user.do_not_disturb?
+        render json: { queued: false, reason: "do_not_disturb" }
+        return
+      end
+
       RateLimiter.new(current_user, "reliable-push-test", 1.minute, 2).performed!
-      Jobs.enqueue(
-        :reliable_push_test_notification,
-        user_id: current_user.id,
-        subscription_id: subscription.id,
-      )
-      render json: { queued: true }
+      job_args = { user_id: current_user.id, subscription_id: subscription.id }
+      if params[:background].to_s == "true"
+        Jobs.enqueue_in(30.seconds, :reliable_push_test_notification, job_args)
+        render json: { queued: true, delay_seconds: 30 }
+      else
+        Jobs.enqueue(:reliable_push_test_notification, job_args)
+        render json: { queued: true, delay_seconds: 0 }
+      end
     end
 
     private

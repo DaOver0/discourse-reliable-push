@@ -1,10 +1,18 @@
 en:
+  admin_js:
+    admin:
+      site_settings:
+        categories:
+          discourse_reliable_push: "Discourse Reliable Push"
+        reliable_push_enabled: "Enable Reliable Push"
+        reliable_push_auto_repair: "Auto-repair push subscriptions"
+        reliable_push_test_notifications: "Allow test push notifications"
   js:
     discourse_reliable_push:
       title: "Reliable Web Push"
       description: "Push registration check for this browser/PWA. Forum and Chat notification rules remain unchanged."
       checking: "Checking this device…"
-      ready: "Connected: subscription is stored on the server."
+      ready: "Subscription is registered on the server. Use the 30-second background test to check delivery with the PWA closed."
       unsupported: "Web Push is not supported in this browser. On iOS, open the Home Screen PWA."
       denied: "Notifications are blocked. Enable them in system/browser settings."
       not_enabled: "Push notifications are not enabled on this device."
@@ -16,6 +24,9 @@ en:
       connect: "Enable on this device"
       verify: "Check again"
       send_test: "Send test push"
+      send_background_test: "Test in background (30 sec)"
+      background_test_queued: "Push scheduled in approximately 30 seconds. Close the PWA interface now; the server will send it without an open page."
+      test_dnd: "Discourse Do Not Disturb is enabled. Turn it off before running the test."
       test_queued: "Test message queued. Delivery and display depend on the operating system."
       test_failed: "Could not queue test notification."
       not_installed: "For background notifications on iPhone/iPad, install this forum on the Home Screen."

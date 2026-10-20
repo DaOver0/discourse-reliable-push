@@ -61,6 +61,20 @@ RSpec.describe "Reliable Push subscriptions" do
     post "/reliable-push/test.json", params: { subscription: subscription_params }
     expect(response.status).to eq(200)
     expect(response.parsed_body["queued"]).to eq(true)
+    expect(response.parsed_body["delay_seconds"]).to eq(0)
+  end
+
+  it "schedules a push after PWA can be closed" do
+    post "/reliable-push/sync.json", params: { subscription: subscription_params }
+    Jobs.expects(:enqueue_in).with(
+      30.seconds,
+      :reliable_push_test_notification,
+      user_id: user.id,
+      subscription_id: user.push_subscriptions.first.id,
+    )
+    post "/reliable-push/test.json", params: { subscription: subscription_params, background: true }
+    expect(response.status).to eq(200)
+    expect(response.parsed_body).to include("queued" => true, "delay_seconds" => 30)
   end
 
   it "does not allow testing another user's subscription" do

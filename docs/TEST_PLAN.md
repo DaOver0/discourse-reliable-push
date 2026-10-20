@@ -1,4 +1,4 @@
-# Verification matrix — v0.1.0
+# Verification matrix — v0.1.1
 
 Run from a matching Discourse checkout; not from this standalone archive. Make sure to test **the exact pinned Discourse commit** and matching Chat plugin.
 
@@ -31,3 +31,13 @@ Run from a matching Discourse checkout; not from this standalone archive. Make s
 | Reopen in airplane mode | Visible error, no unbounded retries |
 
 **Network:** inspect Sidekiq and browser developer tools. If tests aren't working, collect logs with sensitive `endpoint`/`auth`/`p256dh` values redacted.
+
+## Closed-PWA diagnostic test
+
+- In PWA: ensure ready, click **Test in background (30 sec)**, then close interface immediately.
+- Check OS notification after 45–90 sec; do not force-stop from OS application settings.
+- Test immediate push separately.
+- Confirm `Rails.logger` includes acceptance line for successful `WebPush.payload_send`; absence of display after provider acceptance is **not** an indication that the server never sent.
+- Verify DND returns `queued: false`, no job queued.
+- Confirm rate limit applies jointly to immediate and delayed tests.
+- If delayed test works but Chat message push does not, test after a period longer than `push_notification_time_window_mins`, with another account sending the message and channel preferences verified.

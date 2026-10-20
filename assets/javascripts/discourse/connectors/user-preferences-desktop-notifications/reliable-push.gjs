@@ -43,6 +43,11 @@ export default class ReliablePushPreferences extends Component {
               class="btn btn-primary"
               {{on "click" this.reliablePush.sendTest}}
             >{{i18n "discourse_reliable_push.send_test"}}</button>
+            <button
+              type="button"
+              class="btn btn-default"
+              {{on "click" this.reliablePush.sendBackgroundTest}}
+            >{{i18n "discourse_reliable_push.send_background_test"}}</button>
           {{/if}}
         </div>
         {{#if this.reliablePush.testResult}}
