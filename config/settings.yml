@@ -1,0 +1,10 @@
+discourse_reliable_push:
+  reliable_push_enabled:
+    default: true
+    client: true
+  reliable_push_auto_repair:
+    default: true
+    client: true
+  reliable_push_test_notifications:
+    default: true
+    client: true

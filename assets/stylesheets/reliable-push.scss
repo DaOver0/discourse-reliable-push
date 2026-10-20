@@ -1,0 +1,23 @@
+.reliable-push-status {
+  display: block;
+  margin-top: 0.75em;
+  padding: 0.8em 1em;
+  border: 1px solid var(--primary-low);
+  border-radius: 6px;
+
+  &__title {
+    margin: 0 0 0.35em;
+    font-weight: 600;
+  }
+
+  &__description, &__message {
+    margin: 0 0 0.6em;
+    color: var(--primary-medium);
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+  }
+}

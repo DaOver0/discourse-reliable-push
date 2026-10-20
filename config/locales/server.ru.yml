@@ -1,0 +1,8 @@
+ru:
+  site_settings:
+    reliable_push_enabled: "Включить диагностику и восстановление подписок PWA Web Push"
+    reliable_push_auto_repair: "Автоматически восстанавливать ранее разрешённые push-подписки"
+    reliable_push_test_notifications: "Разрешить тестовые push-уведомления на собственные устройства пользователя"
+  discourse_reliable_push:
+    test_title: "Проверка push — %{site_title}"
+    test_body: "Если вы видите это сообщение, тестовый Web Push получен устройством."

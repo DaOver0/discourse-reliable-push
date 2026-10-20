@@ -1,0 +1,8 @@
+en:
+  site_settings:
+    reliable_push_enabled: "Enable Discourse Reliable Push: PWA subscription diagnostics and recovery"
+    reliable_push_auto_repair: "Automatically restore previously enabled push subscriptions when permitted"
+    reliable_push_test_notifications: "Allow users to queue test push notifications for their own devices"
+  discourse_reliable_push:
+    test_title: "Push test — %{site_title}"
+    test_body: "If you see this, your device received the test Web Push notification."

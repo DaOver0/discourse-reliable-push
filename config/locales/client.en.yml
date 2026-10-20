@@ -1,0 +1,21 @@
+en:
+  js:
+    discourse_reliable_push:
+      title: "Reliable Web Push"
+      description: "Push registration check for this browser/PWA. Forum and Chat notification rules remain unchanged."
+      checking: "Checking this device…"
+      ready: "Connected: subscription is stored on the server."
+      unsupported: "Web Push is not supported in this browser. On iOS, open the Home Screen PWA."
+      denied: "Notifications are blocked. Enable them in system/browser settings."
+      not_enabled: "Push notifications are not enabled on this device."
+      no_worker: "Discourse service worker is not ready. Reopen the installed PWA and retry."
+      repair_needed: "The previous push subscription needs to be restored."
+      unavailable_key: "Discourse VAPID configuration is missing. Contact an administrator."
+      error: "Could not check push registration. Check connectivity and try again."
+      repairing: "Restoring push registration…"
+      connect: "Enable on this device"
+      verify: "Check again"
+      send_test: "Send test push"
+      test_queued: "Test message queued. Delivery and display depend on the operating system."
+      test_failed: "Could not queue test notification."
+      not_installed: "For background notifications on iPhone/iPad, install this forum on the Home Screen."
